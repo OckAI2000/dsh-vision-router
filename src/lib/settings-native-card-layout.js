@@ -96,7 +96,7 @@ export function transformSettingsIaToNativeCards(source = SETTINGS_IA_CLIENT_PRE
       function pageDirty(id){
         if(id==='general'&&invalidChainDraft)return true;
         if(id==='strategy'&&invalidGuidanceDraft)return true;
-        if(id==='advanced'&&(invalidWrapperDraft||invalidAutoWrapperDraft))return true;
+        if(id==='advanced'&&invalidWrapperDraft)return true;
         return pagePlan(id).length>0||invalidKeys.some(function(key){return pageOwns(id,key);});
       }
       function pageValid(id){

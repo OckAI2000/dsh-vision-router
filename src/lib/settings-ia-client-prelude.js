@@ -99,7 +99,6 @@ export const SETTINGS_IA_CLIENT_PRELUDE = String.raw`(function(){
       var draftsPair=React.useState({}),drafts=draftsPair[0],setDrafts=draftsPair[1];
       var chainPair=React.useState(undefined),chainDraft=chainPair[0],setChainDraft=chainPair[1];
       var wrapperPair=React.useState(undefined),wrapperDraft=wrapperPair[0],setWrapperDraft=wrapperPair[1];
-      var autoWrapperPair=React.useState(undefined),autoWrapperDraft=autoWrapperPair[0],setAutoWrapperDraft=autoWrapperPair[1];
       var guidancePair=React.useState(undefined),guidanceDraft=guidancePair[0],setGuidanceDraft=guidancePair[1];
       var savePair=React.useState({status:'idle'}),saveState=savePair[0],setSaveState=savePair[1];
       var catalogPair=React.useState({status:'idle',groups:[],failures:[]}),catalog=catalogPair[0],setCatalog=catalogPair[1];
@@ -112,6 +111,7 @@ export const SETTINGS_IA_CLIENT_PRELUDE = String.raw`(function(){
       var ocrPair=React.useState({status:'idle'}),ocrState=ocrPair[0],setOcrState=ocrPair[1];
       var ocrFilePair=React.useState(undefined),ocrFile=ocrFilePair[0],setOcrFile=ocrFilePair[1];
       var egressStatePair=React.useState(readEgressNoticeDismissed()),egressDismissed=egressStatePair[0],setEgressDismissed=egressStatePair[1];
+      var autoWrapperPair=React.useState(undefined),autoWrapperDraft=autoWrapperPair[0],setAutoWrapperDraft=autoWrapperPair[1];
       var catalogGen=React.useRef?React.useRef(0):{current:0};
       var capsGen=React.useRef?React.useRef(0):{current:0};
       var h=React.createElement;
