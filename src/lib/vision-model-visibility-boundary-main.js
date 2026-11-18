@@ -210,18 +210,40 @@ export function visionProjectionSourceProvider(provider, config) {
  * (and only when) it names a twin the router itself registered. The model id
  * and reasoning effort are preserved, and any unknown provider passes through
  * untouched.
+ *
+ * `sourceFor` is the authoritative ownership resolver the Host already exposes
+ * to the browser (`window.__dshVisionRouterRootHardening.sourceFor`). It is
+ * preferred over `config` because the config scope is NOT reliably readable
+ * from a Host projection face: on a served-Web profile the browser's
+ * `configForms.get('vision-router')` can report `status: 'unavailable'` with
+ * `value: undefined` even though the router is fully configured server-side.
+ * With an unavailable config the config-only rule silently no-ops and the
+ * credits gate keeps seeing the raw twin id. Ownership is a server-authored
+ * table, so it stays correct in exactly that situation.
  */
-export function projectVisionModeSelection(value, config) {
+export function projectVisionModeSelection(value, config, sourceFor) {
   if (!value || typeof value !== 'object') return value
-  if (!config || typeof config !== 'object') return value
+  const lookup = typeof sourceFor === 'function' ? sourceFor : undefined
+  if (!lookup && (!config || typeof config !== 'object')) return value
   let next = value.next
   let lastUsed = value.lastUsed
   let changed = false
   for (const key of ['next', 'lastUsed']) {
     const selection = value[key]
     if (!selection || typeof selection !== 'object') continue
-    const source = visionProjectionSourceProvider(selection.provider, config)
-    if (!source || source === selection.provider) continue
+    const provider = selection.provider
+    if (typeof provider !== 'string' || provider === '') continue
+    let source
+    if (lookup) {
+      try {
+        source = lookup(provider)
+      } catch (_) {
+        source = undefined
+      }
+      if (typeof source !== 'string' || source === '' || source === provider) source = undefined
+    }
+    if (source === undefined) source = visionProjectionSourceProvider(provider, config)
+    if (!source || source === provider) continue
     if (key === 'next') next = { ...selection, provider: source }
     else lastUsed = { ...selection, provider: source }
     changed = true
@@ -321,26 +343,70 @@ export const VISION_MODEL_VISIBILITY_PRELUDE = String.raw`(function(){
   // projection key is touched, and unknown providers pass through unchanged.
   var UI_SESSION_TARGET = '${UI_SESSION_TARGET}';
 
+  // The ownership table is the server-authored authority for "which routes did
+  // this plugin register, and from which source". It is preferred over the
+  // browser config scope, which a served-Web Host may report as unavailable
+  // (see projectVisionModeSelection). Resolved lazily on every read because the
+  // root-hardening prelude is installed after this one.
+  function visionOwnershipApi() {
+    try {
+      var api = window.__dshVisionRouterRootHardening;
+      return api && typeof api.sourceFor === 'function' ? api : undefined;
+    } catch (_) {
+      return undefined;
+    }
+  }
+
+  function visionOwnershipRevision() {
+    var api = visionOwnershipApi();
+    if (!api || typeof api.getSnapshot !== 'function') return 0;
+    try {
+      var snapshot = api.getSnapshot();
+      return snapshot && Number.isFinite(snapshot.revision) ? snapshot.revision : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   function wrapModelSelectionFace(face, settings) {
     if (!face || typeof face !== 'object') return face;
     if (typeof face.getSnapshot !== 'function') return face;
     var lastRaw;
     var lastConfigKey;
+    var lastRevision;
     var lastProjected;
     function getSnapshot() {
       var raw = face.getSnapshot();
       var config = currentVisionConfig(settings);
       var key = configKey(config);
-      if (raw === lastRaw && key === lastConfigKey && lastProjected !== undefined) return lastProjected;
+      var revision = visionOwnershipRevision();
+      if (raw === lastRaw && key === lastConfigKey && revision === lastRevision && lastProjected !== undefined) {
+        return lastProjected;
+      }
+      var api = visionOwnershipApi();
+      var sourceFor = api ? function(provider) { return api.sourceFor(provider); } : undefined;
       lastRaw = raw;
       lastConfigKey = key;
-      lastProjected = projectVisionModeSelection(raw, config);
+      lastRevision = revision;
+      lastProjected = projectVisionModeSelection(raw, config, sourceFor);
       return lastProjected;
     }
     var wrapped = {
       getSnapshot: getSnapshot,
       subscribe: function(listener) {
-        return typeof face.subscribe === 'function' ? face.subscribe(listener) : function(){};
+        var stops = [];
+        if (typeof face.subscribe === 'function') stops.push(face.subscribe(listener));
+        // Ownership arrives later and can change after a plugin reload; without
+        // this the credits gate would keep a stale projected provider.
+        var api = visionOwnershipApi();
+        if (api && typeof api.subscribe === 'function') {
+          try { stops.push(api.subscribe(listener)); } catch (_) {}
+        }
+        return function(){
+          for (var i = 0; i < stops.length; i++) {
+            try { if (typeof stops[i] === 'function') stops[i](); } catch (_) {}
+          }
+        };
       }
     };
     // Preserve any extra members the Host face exposes (identity is stable per
