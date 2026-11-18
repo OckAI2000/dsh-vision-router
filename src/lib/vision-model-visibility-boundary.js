@@ -7,6 +7,8 @@ export {
   VISION_MODEL_VISIBILITY_PRELUDE,
   projectVisionModeDirectoryState,
   mapVisionPresentationSelection,
+  visionProjectionSourceProvider,
+  projectVisionModeSelection,
 } from './vision-model-visibility-boundary-main.js'
 
 export function injectVisionModelVisibilityBoundary(html) {

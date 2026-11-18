@@ -2,6 +2,7 @@ import { injectClientCarrierHtml, installClientScriptCarriers } from './client-s
 const VISION_MODE_WRAPPER_SOURCE = 'deepseek-official'
 const DEFAULT_WRAPPER_ROUTE = 'deepseek-vision'
 const MODEL_SELECTION_TARGET = '@deepseek-ai/dsh-client-ui-model-selection'
+const UI_SESSION_TARGET = '@deepseek-ai/dsh-client-ui-session'
 const VISIBILITY_MARK = 'data-vision-router-model-visibility-boundary'
 
 function visionPresentationGroup(groups, id) {
@@ -173,6 +174,62 @@ export function mapVisionPresentationSelection(state, selection, config) {
   }
 }
 
+/**
+ * Resolve the source provider for a vision-router-owned twin from config alone.
+ *
+ * This is the projection counterpart of `reconcileTwins` in src/index.js: when
+ * the router auto-wraps every provider (the default) or a provider is listed in
+ * `wrappedProviders` / `autoVisionProviders`, it registers a synthetic route
+ * named `<provider>-vision`. Consumers of the Host's authoritative
+ * `modelSelection` projection (notably dsh-connect-workbuddy's credits gate)
+ * see the raw twin id and reject it. Mapping it back here keeps those consumers
+ * working without changing the real route the session uses.
+ */
+export function visionProjectionSourceProvider(provider, config) {
+  if (typeof provider !== 'string' || provider === '' || !config || typeof config !== 'object') return undefined
+  const wrapperRoute = typeof config.wrapperRoute === 'string' && config.wrapperRoute.trim() !== ''
+    ? config.wrapperRoute.trim()
+    : DEFAULT_WRAPPER_ROUTE
+  if (visionPresentationHasOwn(config, 'wrapperRoute') && wrapperRoute === '') return undefined
+  if (provider === wrapperRoute) return VISION_MODE_WRAPPER_SOURCE
+  if (!provider.endsWith('-vision')) return undefined
+  const source = provider.slice(0, -'-vision'.length)
+  if (source === '' || source === VISION_MODE_WRAPPER_SOURCE || source.endsWith('-vision')) return undefined
+  const wrapped = Array.isArray(config.wrappedProviders) ? config.wrappedProviders : []
+  if (wrapped.some((entry) => entry && entry.provider === source)) return source
+  const autoVision = Array.isArray(config.autoVisionProviders) ? config.autoVisionProviders : []
+  if (autoVision.some((entry) => entry && entry.provider === source)) return source
+  if (config.autoWrapProviders !== false) return source
+  return undefined
+}
+
+/**
+ * Presentation-only rewrite of the `modelSelection` projection face.
+ *
+ * Both `next` and `lastUsed` selection slots get their provider translated when
+ * (and only when) it names a twin the router itself registered. The model id
+ * and reasoning effort are preserved, and any unknown provider passes through
+ * untouched.
+ */
+export function projectVisionModeSelection(value, config) {
+  if (!value || typeof value !== 'object') return value
+  if (!config || typeof config !== 'object') return value
+  let next = value.next
+  let lastUsed = value.lastUsed
+  let changed = false
+  for (const key of ['next', 'lastUsed']) {
+    const selection = value[key]
+    if (!selection || typeof selection !== 'object') continue
+    const source = visionProjectionSourceProvider(selection.provider, config)
+    if (!source || source === selection.provider) continue
+    if (key === 'next') next = { ...selection, provider: source }
+    else lastUsed = { ...selection, provider: source }
+    changed = true
+  }
+  if (!changed) return value
+  return { ...value, next, lastUsed }
+}
+
 const VISIBILITY_HELPER_SOURCE = [
   visionPresentationGroup,
   visionPresentationHasModel,
@@ -186,6 +243,8 @@ const VISIBILITY_HELPER_SOURCE = [
   visionPresentationHiddenSources,
   projectVisionModeDirectoryState,
   mapVisionPresentationSelection,
+  visionProjectionSourceProvider,
+  projectVisionModeSelection,
 ].map((fn) => fn.toString()).join('\n')
 
 export const VISION_MODEL_VISIBILITY_PRELUDE = String.raw`(function(){
@@ -249,6 +308,111 @@ export const VISION_MODEL_VISIBILITY_PRELUDE = String.raw`(function(){
       });
     } catch (_) {
       return 'invalid';
+    }
+  }
+
+  // ---- dsh-client-ui-session projection seam ---------------------------------
+  // The Host's 'useProjection' hook is built from this plugin's
+  // 'keyedHooks.projection: key => session.projections.faceOf(key)' descriptor.
+  // Wrapping the face for 'modelSelection' lets presentation-only consumers
+  // (e.g. dsh-connect-workbuddy's credits gate, which has a strict provider
+  // allowlist) keep working while Vision mode is on: the authoritative route
+  // stays on the twin route, but readers see the source provider. No other
+  // projection key is touched, and unknown providers pass through unchanged.
+  var UI_SESSION_TARGET = '${UI_SESSION_TARGET}';
+
+  function wrapModelSelectionFace(face, settings) {
+    if (!face || typeof face !== 'object') return face;
+    if (typeof face.getSnapshot !== 'function') return face;
+    var lastRaw;
+    var lastConfigKey;
+    var lastProjected;
+    function getSnapshot() {
+      var raw = face.getSnapshot();
+      var config = currentVisionConfig(settings);
+      var key = configKey(config);
+      if (raw === lastRaw && key === lastConfigKey && lastProjected !== undefined) return lastProjected;
+      lastRaw = raw;
+      lastConfigKey = key;
+      lastProjected = projectVisionModeSelection(raw, config);
+      return lastProjected;
+    }
+    var wrapped = {
+      getSnapshot: getSnapshot,
+      subscribe: function(listener) {
+        return typeof face.subscribe === 'function' ? face.subscribe(listener) : function(){};
+      }
+    };
+    // Preserve any extra members the Host face exposes (identity is stable per
+    // key, so consumers may hold on to the face object directly).
+    for (var name in face) {
+      if (name === 'getSnapshot' || name === 'subscribe') continue;
+      try { wrapped[name] = face[name]; } catch (_) {}
+    }
+    return wrapped;
+  }
+
+  function decorateUiSession(ctor) {
+    if (typeof ctor !== 'function') return ctor;
+    var proto = ctor.prototype;
+    if (!proto || typeof proto.materialize !== 'function') return ctor;
+    if (proto.materialize.__visionRouterProjection) return ctor;
+    var originalMaterialize = proto.materialize;
+    function materialize() {
+      var value = originalMaterialize.apply(this, arguments);
+      if (!value || typeof value !== 'object') return value;
+      var keyedHooks = value.keyedHooks;
+      if (!keyedHooks || typeof keyedHooks.projection !== 'function') return value;
+      var self = this;
+      if (!self.__visionRouterSettings) {
+        try { self.__visionRouterSettings = bindVisionSettings(self.ctx); } catch (_) { self.__visionRouterSettings = null; }
+      }
+      var settings = self.__visionRouterSettings;
+      var originalProjection = keyedHooks.projection;
+      var keyedCache = typeof WeakMap === 'function' ? new WeakMap() : undefined;
+      var faceWrappers = typeof WeakMap === 'function' ? new WeakMap() : undefined;
+      function projection(key) {
+        var face = originalProjection.call(self, key);
+        if (key !== 'modelSelection' || !face || typeof face !== 'object') return face;
+        if (faceWrappers && faceWrappers.has(face)) return faceWrappers.get(face);
+        var wrapped = wrapModelSelectionFace(face, settings);
+        if (faceWrappers) faceWrappers.set(face, wrapped);
+        return wrapped;
+      }
+      try {
+        // Return a fresh value object so other sessions/consumers are untouched.
+        value = Object.assign({}, value, { keyedHooks: Object.assign({}, keyedHooks, { projection: projection }) });
+      } catch (_) {}
+      return value;
+    }
+    try { Object.defineProperty(materialize, '__visionRouterProjection', { value: true }); } catch (_) {}
+    proto.materialize = materialize;
+    return ctor;
+  }
+
+  function patchUiSessionLoader(loader) {
+    if (!loader || (typeof loader !== 'object' && typeof loader !== 'function')) return;
+    if (typeof loader.load === 'function' && !loader.load.__visionRouterProjection) {
+      var original = loader.load;
+      function load(spec) {
+        if (spec && spec.id === UI_SESSION_TARGET && typeof spec.factory === 'function') {
+          var factory = spec.factory;
+          spec = Object.assign({}, spec, {
+            factory: function(require) {
+              var exports = factory(require);
+              try {
+                if (exports && typeof exports === 'object' && exports.UiSession) {
+                  exports.UiSession = decorateUiSession(exports.UiSession);
+                }
+              } catch (_) {}
+              return exports;
+            }
+          });
+        }
+        return original.call(this, spec);
+      }
+      try { Object.defineProperty(load, '__visionRouterProjection', { value: true }); } catch (_) {}
+      loader.load = load;
     }
   }
 
@@ -422,6 +586,7 @@ export const VISION_MODEL_VISIBILITY_PRELUDE = String.raw`(function(){
 
   function patchLoader(loader) {
     if (!loader || (typeof loader !== 'object' && typeof loader !== 'function')) return;
+    try { patchUiSessionLoader(loader); } catch (_) {}
     if (typeof loader.load === 'function' && !loader.load.__visionRouterModelVisibility) {
       var original = loader.load;
       function load(spec) {
