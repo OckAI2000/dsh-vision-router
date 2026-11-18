@@ -361,6 +361,20 @@ export const Config = z.object({
       }),
     )
     .default([{ provider: 'deepseek-official', models: [] }]),
+  // Opt-in list of chat models that turn Vision mode ON automatically when
+  // the user switches to them: selecting a listed model (empty model list =
+  // the whole provider) routes the pick onto that provider's image-capable
+  // twin instead of the plain text route. Empty by default — unlike
+  // wrappedProviders this never falls back to autoWrapProviders.
+  // 切换到这些聊天模型时自动开启识图模式；模型留空表示整个 Provider。
+  autoVisionProviders: z
+    .array(
+      z.object({
+        provider: z.string(),
+        models: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
   httpProviders: z
     .array(
       z.object({
@@ -1329,6 +1343,12 @@ export function apply(ctx, config = {}, runtime = {}) {
     (current().wrappedProviders ?? []).filter(
       (entry) => entry && typeof entry.provider === 'string' && entry.provider !== '',
     )
+  // autoVisionProviders rows carry the same twin intent plus auto-enable:
+  // switching to a listed model lands on the twin without a manual toggle.
+  const autoVisionProviders = () =>
+    (current().autoVisionProviders ?? []).filter(
+      (entry) => entry && typeof entry.provider === 'string' && entry.provider !== '',
+    )
   const ownRoutes = () =>
     new Set(
       [wrapperRoute(), chainRoute(), HTTP_ROUTE, 'deepseek-official'].filter(
@@ -1461,6 +1481,21 @@ export function apply(ctx, config = {}, runtime = {}) {
     for (const entry of wrappedProviders()) {
       const provider = entry.provider
       if (ownRoutes().has(provider) || provider.endsWith('-vision')) continue
+      const source = liveProviders.get(provider)
+      if (source === undefined) continue
+      const models = Array.isArray(entry.models)
+        ? entry.models.filter((model) => typeof model === 'string' && model !== '')
+        : []
+      wanted.set(provider, { models, sourceName: source.name })
+    }
+    // autoVisionProviders is opt-in auto-enable intent, not wrap scope: it
+    // materializes the twin so a listed pick can land on it even when
+    // autoWrapProviders is off and no wrappedProviders row exists. An explicit
+    // wrappedProviders row (processed above) keeps precedence.
+    for (const entry of autoVisionProviders()) {
+      const provider = entry.provider
+      if (ownRoutes().has(provider) || provider.endsWith('-vision')) continue
+      if (wanted.has(provider)) continue
       const source = liveProviders.get(provider)
       if (source === undefined) continue
       const models = Array.isArray(entry.models)

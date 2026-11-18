@@ -31,6 +31,14 @@ function visionPresentationTwinIntended(config, sourceProvider, modelId) {
     const models = Array.isArray(explicit.models) ? explicit.models : []
     return models.length === 0 || models.includes(modelId)
   }
+  // autoVisionProviders rows are opt-in auto-enable intent: a twin materialized
+  // from such a row is intended even when autoWrapProviders is off.
+  const autoEntries = Array.isArray(config.autoVisionProviders) ? config.autoVisionProviders : []
+  const autoExplicit = autoEntries.find((entry) => entry && entry.provider === sourceProvider)
+  if (autoExplicit) {
+    const autoModels = Array.isArray(autoExplicit.models) ? autoExplicit.models : []
+    return autoModels.length === 0 || autoModels.includes(modelId)
+  }
   return config.autoWrapProviders !== false
 }
 
@@ -191,8 +199,13 @@ export const VISION_MODEL_VISIBILITY_PRELUDE = String.raw`(function(){
   function bindVisionSettings(ctx) {
     try {
       var binder = ctx && ctx.settingsScope;
-      if (!binder || typeof binder.bind !== 'function') return undefined;
-      return binder.bind({ namespace: 'vision-router' });
+      if (binder && typeof binder.bind === 'function') return binder.bind({ namespace: 'vision-router' });
+    } catch (_) {}
+    try {
+      if (!ctx || typeof ctx.get !== 'function') return undefined;
+      var forms = ctx.get('configForms');
+      if (!forms || typeof forms.get !== 'function') return undefined;
+      return forms.get('vision-router');
     } catch (_) {
       return undefined;
     }
@@ -219,11 +232,20 @@ export const VISION_MODEL_VISIBILITY_PRELUDE = String.raw`(function(){
           };
         })
       : [];
+    var autoVision = Array.isArray(config.autoVisionProviders)
+      ? config.autoVisionProviders.map(function(entry){
+          return {
+            provider: entry && typeof entry.provider === 'string' ? entry.provider : '',
+            models: entry && Array.isArray(entry.models) ? entry.models.slice() : []
+          };
+        })
+      : [];
     try {
       return JSON.stringify({
         wrapperRoute: typeof config.wrapperRoute === 'string' ? config.wrapperRoute : '',
         autoWrapProviders: config.autoWrapProviders !== false,
-        wrappedProviders: wrapped
+        wrappedProviders: wrapped,
+        autoVisionProviders: autoVision
       });
     } catch (_) {
       return 'invalid';

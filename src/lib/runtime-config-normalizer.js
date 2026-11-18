@@ -256,40 +256,40 @@ export function runtimeConfigFieldBudgetError(field, value) {
     return undefined
   }
 
-  if (field === 'wrappedProviders') {
+  if (field === 'wrappedProviders' || field === 'autoVisionProviders') {
     if (!Array.isArray(value)) return undefined
     if (value.length > MAX_RUNTIME_WRAPPED_PROVIDER_ROWS) {
-      return `wrappedProviders may contain at most ${MAX_RUNTIME_WRAPPED_PROVIDER_ROWS} provider rows`
+      return `${field} may contain at most ${MAX_RUNTIME_WRAPPED_PROVIDER_ROWS} provider rows`
     }
     let bytes = 0
     for (const entry of value) {
       if (!plainObject(entry)) continue
       if (unknownKeys(entry, new Set(['provider', 'models'])).length > 0) {
-        return 'wrappedProviders rows may contain only provider and models'
+        return `${field} rows may contain only provider and models`
       }
       if (typeof entry.provider === 'string') {
         if (entry.provider.length > MAX_RUNTIME_MODEL_ID_CHARS) {
-          return `wrappedProviders provider ids may contain at most ${MAX_RUNTIME_MODEL_ID_CHARS} characters`
+          return `${field} provider ids may contain at most ${MAX_RUNTIME_MODEL_ID_CHARS} characters`
         }
         bytes += identifierBytes(entry.provider)
       }
       if (Array.isArray(entry.models)) {
         if (entry.models.length > MAX_RUNTIME_WRAPPED_MODELS_PER_PROVIDER) {
-          return `wrappedProviders rows may contain at most ${MAX_RUNTIME_WRAPPED_MODELS_PER_PROVIDER} models`
+          return `${field} rows may contain at most ${MAX_RUNTIME_WRAPPED_MODELS_PER_PROVIDER} models`
         }
         for (const model of entry.models) {
           if (typeof model !== 'string') continue
           if (model.length > MAX_RUNTIME_MODEL_ID_CHARS) {
-            return `wrappedProviders model ids may contain at most ${MAX_RUNTIME_MODEL_ID_CHARS} characters`
+            return `${field} model ids may contain at most ${MAX_RUNTIME_MODEL_ID_CHARS} characters`
           }
           bytes += identifierBytes(model)
           if (bytes > MAX_RUNTIME_COMPLEX_FIELD_BYTES) {
-            return `wrappedProviders exceeds the ${MAX_RUNTIME_COMPLEX_FIELD_BYTES}-byte runtime budget`
+            return `${field} exceeds the ${MAX_RUNTIME_COMPLEX_FIELD_BYTES}-byte runtime budget`
           }
         }
       }
       if (bytes > MAX_RUNTIME_COMPLEX_FIELD_BYTES) {
-        return `wrappedProviders exceeds the ${MAX_RUNTIME_COMPLEX_FIELD_BYTES}-byte runtime budget`
+        return `${field} exceeds the ${MAX_RUNTIME_COMPLEX_FIELD_BYTES}-byte runtime budget`
       }
     }
   }
@@ -343,6 +343,7 @@ export function normalizeRuntimeVisionConfig(value) {
     fallbacks: normalizeFallbacks(source.fallbacks),
     extraVisionModels: normalizeExtraVisionModels(source.extraVisionModels),
     wrappedProviders: normalizeWrappedProviders(source.wrappedProviders),
+    autoVisionProviders: normalizeWrappedProviders(source.autoVisionProviders),
     routingMode: normalizeVisionRoutingMode(source.routingMode),
     routingPreference: normalizeVisionRoutingPreference(source.routingPreference),
   }

@@ -77,37 +77,39 @@ export function transformSettingsIaToNativeCards(source = SETTINGS_IA_CLIENT_PRE
 
   next = replaceRequired(
     next,
-    "      var valid=validChain(chainRows())&&validWrapperRows(wrapperRows())&&validGuidance(guidanceRows())&&invalidKeys.length===0;",
-    `      var valid=validChain(chainRows())&&validWrapperRows(wrapperRows())&&validGuidance(guidanceRows())&&invalidKeys.length===0;
+    "      var valid=validChain(chainRows())&&validWrapperRows(wrapperRows())&&validWrapperRows(autoWrapperRows())&&validGuidance(guidanceRows())&&invalidKeys.length===0;",
+    `      var valid=validChain(chainRows())&&validWrapperRows(wrapperRows())&&validWrapperRows(autoWrapperRows())&&validGuidance(guidanceRows())&&invalidKeys.length===0;
       var pageKeys={
         general:new Set(['providers','localOnlyVision','freeFallback']),
         strategy:new Set(['tool','structuredVisionBootstrap','visionDepth','visionDepthMaxCalls','guidanceOverrides']),
         local:new Set(['localOllama','localLmStudio','desktopScreenshot']),
-        advanced:new Set(['wrappedProviders','downscale','downscaleMaxPixels','cache','cacheTtlSeconds','cacheMaxEntries','timeoutMs','visionTaskTimeoutMs','ocrTimeoutMs','ocrEngine','visionTurnBudgetMs','freeCloudFirst','autoWrapProviders','allowRemoteSettings','proxy','proxyHosts','rewriteImages','routing','reverseRouting','textProvider','progressiveTools','stealth','wrapperRoute','chainRoute','extraVisionModels']),
+        advanced:new Set(['wrappedProviders','autoVisionProviders','downscale','downscaleMaxPixels','cache','cacheTtlSeconds','cacheMaxEntries','timeoutMs','visionTaskTimeoutMs','ocrTimeoutMs','ocrEngine','visionTurnBudgetMs','freeCloudFirst','autoWrapProviders','allowRemoteSettings','proxy','proxyHosts','rewriteImages','routing','reverseRouting','textProvider','progressiveTools','stealth','wrapperRoute','chainRoute','extraVisionModels']),
         diagnostics:new Set([])
       };
       var invalidChainDraft=chainDraft!==undefined&&!validChain(chainRows());
       var invalidGuidanceDraft=guidanceDraft!==undefined&&!validGuidance(guidanceRows());
       var invalidWrapperDraft=wrapperDraft!==undefined&&!validWrapperRows(wrapperRows());
-      var cardDirty=dirty||invalidChainDraft||invalidGuidanceDraft||invalidWrapperDraft;
+      var invalidAutoWrapperDraft=autoWrapperDraft!==undefined&&!validWrapperRows(autoWrapperRows());
+      var cardDirty=dirty||invalidChainDraft||invalidGuidanceDraft||invalidWrapperDraft||invalidAutoWrapperDraft;
       function pageOwns(id,key){var keys=pageKeys[id];return !!keys&&keys.has(key);}
       function pagePlan(id){return plan.filter(function(item){return pageOwns(id,item.key);});}
       function pageDirty(id){
         if(id==='general'&&invalidChainDraft)return true;
         if(id==='strategy'&&invalidGuidanceDraft)return true;
-        if(id==='advanced'&&invalidWrapperDraft)return true;
+        if(id==='advanced'&&(invalidWrapperDraft||invalidAutoWrapperDraft))return true;
         return pagePlan(id).length>0||invalidKeys.some(function(key){return pageOwns(id,key);});
       }
       function pageValid(id){
         if(id==='general'&&!validChain(chainRows()))return false;
         if(id==='strategy'&&!validGuidance(guidanceRows()))return false;
-        if(id==='advanced'&&!validWrapperRows(wrapperRows()))return false;
+        if(id==='advanced'&&(!validWrapperRows(wrapperRows())||!validWrapperRows(autoWrapperRows())))return false;
         return !invalidKeys.some(function(key){return pageOwns(id,key);});
       }
       function discardPage(id){
         var keys=pageKeys[id]||new Set();
         if(keys.has('providers'))setChainDraft(undefined);
         if(keys.has('wrappedProviders'))setWrapperDraft(undefined);
+        if(keys.has('autoVisionProviders'))setAutoWrapperDraft(undefined);
         if(keys.has('guidanceOverrides'))setGuidanceDraft(undefined);
         setDrafts(function(previous){var next=Object.assign({},previous);keys.forEach(function(key){delete next[key];});return next;});
         setSaveState({status:'idle',page:id});

@@ -409,7 +409,7 @@ test('acceptance: every necessary editable setting from the old surface has one 
     'localOllama', 'localLmStudio', 'desktopScreenshot',
     'downscale', 'downscaleMaxPixels', 'cache', 'cacheTtlSeconds', 'cacheMaxEntries',
     'timeoutMs', 'visionTaskTimeoutMs', 'visionTurnBudgetMs', 'ocrTimeoutMs', 'freeCloudFirst',
-    'autoWrapProviders', 'wrappedProviders', 'allowRemoteSettings', 'proxy', 'proxyHosts',
+    'autoWrapProviders', 'wrappedProviders', 'autoVisionProviders', 'allowRemoteSettings', 'proxy', 'proxyHosts',
     'rewriteImages', 'routing', 'reverseRouting', 'textProvider',
     'progressiveTools', 'stealth', 'wrapperRoute', 'chainRoute', 'extraVisionModels',
   ]

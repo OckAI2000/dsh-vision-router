@@ -33,6 +33,14 @@ function visionModeTwinIntended(config, sourceProvider, modelId) {
     const models = Array.isArray(explicit.models) ? explicit.models : []
     return models.length === 0 || models.includes(modelId)
   }
+  // autoVisionProviders rows are opt-in auto-enable intent: a twin materialized
+  // from such a row is intended even when autoWrapProviders is off.
+  const autoEntries = Array.isArray(config.autoVisionProviders) ? config.autoVisionProviders : []
+  const autoExplicit = autoEntries.find((entry) => entry && entry.provider === sourceProvider)
+  if (autoExplicit) {
+    const autoModels = Array.isArray(autoExplicit.models) ? autoExplicit.models : []
+    return autoModels.length === 0 || autoModels.includes(modelId)
+  }
   return config.autoWrapProviders !== false
 }
 
@@ -101,6 +109,18 @@ function visionModeTarget(current, provider) {
     model: current.model,
     ...(current.reasoningEffort === undefined ? {} : { reasoningEffort: current.reasoningEffort }),
   }
+}
+
+// True when the current source model is listed in autoVisionProviders, i.e.
+// switching to it should turn the Vision toggle on automatically.
+function visionModeAutoEnabled(config, provider, modelId) {
+  const entries = config && typeof config === 'object' && Array.isArray(config.autoVisionProviders)
+    ? config.autoVisionProviders
+    : []
+  const row = entries.find((entry) => entry && entry.provider === provider)
+  if (!row) return false
+  const models = Array.isArray(row.models) ? row.models : []
+  return models.length === 0 || models.includes(modelId)
 }
 
 /**
@@ -172,6 +192,7 @@ const VISION_MODE_HELPER_SOURCE = [
   visionModeWrapperRoute,
   visionModeOwnedWrapper,
   visionModeTarget,
+  visionModeAutoEnabled,
   resolveVisionModePair,
 ].map((fn) => fn.toString()).join('\n')
 
@@ -482,8 +503,13 @@ export const CLIENT_PRESENTATION_PRELUDE = String.raw`(function(){
   function bindVisionModeSettings(ctx) {
     try {
       var binder = ctx && ctx.settingsScope;
-      if (!binder || typeof binder.bind !== 'function') return undefined;
-      return binder.bind({ namespace: 'vision-router' });
+      if (binder && typeof binder.bind === 'function') return binder.bind({ namespace: 'vision-router' });
+    } catch (_) {}
+    try {
+      if (!ctx || typeof ctx.get !== 'function') return undefined;
+      var forms = ctx.get('configForms');
+      if (!forms || typeof forms.get !== 'function') return undefined;
+      return forms.get('vision-router');
     } catch (_) {
       return undefined;
     }
@@ -1174,6 +1200,7 @@ export const CLIENT_PRESENTATION_PRELUDE = String.raw`(function(){
         // it is still in flight. Keep only an in-flight transaction fence here,
         // never a second source of truth for Vision ON/OFF.
         var selectionTransaction = React.useRef(null);
+        var autoVisionAttempt = React.useRef(null);
         var refreshSelection = React.useState(0)[1];
         var selectionInFlight = !!(selectionTransaction.current &&
           selectionTransaction.current.directory === directory);
@@ -1198,6 +1225,28 @@ export const CLIENT_PRESENTATION_PRELUDE = String.raw`(function(){
         }
         var pair = ownSettling ? { mode: settledMode.current.mode } : livePair;
         var active = pair.mode === 'on';
+        // Auto-enable: when the current source model is in the
+        // autoVisionProviders list, turn Vision on by taking the same select
+        // path a manual toggle click uses. Fire once per model so a failed or
+        // in-flight select cannot loop.
+        React.useEffect(function(){
+          if (!state.current || !Array.isArray(state.groups) || state.groups.length === 0) return;
+          if (state.status !== 'ready' || state.status === 'selecting') return;
+          if (livePair.mode !== 'off' || !livePair.target) return;
+          var cur = state.current;
+          if (!visionModeAutoEnabled(visionConfig, cur.provider, cur.model)) return;
+          var key = cur.provider + '/' + cur.model;
+          if (autoVisionAttempt.current === key) return;
+          var effort = cur.reasoningEffort;
+          var target = {
+            provider: livePair.target.provider,
+            model: cur.model,
+            ...(effort === undefined ? {} : { reasoningEffort: effort })
+          };
+          autoVisionAttempt.current = key;
+          try { Promise.resolve(props.select(target)).catch(function(){ autoVisionAttempt.current = null; }); }
+          catch (_) { autoVisionAttempt.current = null; }
+        }, [state.current, state.groups, state.status, visionConfig]);
         var toastState = React.useState(null);
         var toast = toastState[0];
         var setToast = toastState[1];
